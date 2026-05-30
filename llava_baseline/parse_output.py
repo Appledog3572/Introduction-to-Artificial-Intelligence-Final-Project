@@ -95,7 +95,7 @@ def parse_llava_output(
             continue
 
         x1, y1, x2, y2 = (float(m.group(i)) for i in range(2, 6))
-        score = float(m.group(10)) if m.group(10) is not None else 1.0
+        score = float(m.group(6)) if m.group(6) is not None else 1.0
 
         # If coordinates are normalized (all values <= 1.0), convert to pixels
         if max(abs(x1), abs(y1), abs(x2), abs(y2)) <= 1.0:
