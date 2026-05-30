@@ -140,6 +140,7 @@ def evaluate(
     gts_by_class:   dict[int, list] = defaultdict(list)
 
     latencies: list[float] = []
+    per_image: list[dict] = []
 
     for i in range(n):
         item   = dataset[i]
@@ -153,6 +154,23 @@ def evaluate(
         # Use model-reported latency when available, else wall-clock
         latency = result.latency_ms if result.latency_ms > 0 else wall_ms
         latencies.append(latency)
+
+        preds = [
+            {"class": d.class_name, "bbox": d.bbox, "score": d.score}
+            for d in result.detections
+        ]
+        gts = [
+            {"class": g["class_name"], "bbox": g["bbox"]}
+            for g in item["gt"]
+        ]
+
+        per_image.append({
+            "image_id":   img_id,
+            "latency_ms": round(latency, 1),
+            "raw_text":   result.raw_text,
+            "predictions": preds,
+            "ground_truth": gts,
+        })
 
         for det in result.detections:
             preds_by_class[det.class_id].append({
@@ -191,15 +209,16 @@ def evaluate(
     model_mb  = round(runner.model_size_mb, 1)
 
     results = {
-        "mode":           mode,
-        "split":          split,
-        "n_images":       n,
-        "iou_threshold":  iou_threshold,
-        "mAP":            mean_ap,
-        "AP_per_class":   ap_per_class,
+        "mode":            mode,
+        "split":           split,
+        "n_images":        n,
+        "iou_threshold":   iou_threshold,
+        "mAP":             mean_ap,
+        "AP_per_class":    ap_per_class,
         "mean_latency_ms": mean_lat,
-        "mean_FPS":       mean_fps,
-        "model_size_MB":  model_mb,
+        "mean_FPS":        mean_fps,
+        "model_size_MB":   model_mb,
+        "per_image":       per_image,
     }
 
     print("\n=== Results ===")
