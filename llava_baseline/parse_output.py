@@ -42,14 +42,13 @@ _ALIASES = {
 }
 _NAME_TO_ID.update(_ALIASES)
 
-# Regex: optional class name, then 4 numbers, optional 5th (confidence)
+# Regex: class name, then 4 numbers (optionally wrapped in <>), optional confidence
+# Handles both "Car 120 85 340 210" and "Car <120> <85> <340> <210>"
+_NUM = r"<?\s*(-?\d+(?:\.\d+)?)\s*>?"   # number optionally inside < >
 _LINE_RE = re.compile(
-    r"([a-zA-Z_]+)[\s:]*"           # class name (word chars)
-    r"(-?\d+(?:\.\d+)?)\s+"         # x1
-    r"(-?\d+(?:\.\d+)?)\s+"         # y1
-    r"(-?\d+(?:\.\d+)?)\s+"         # x2
-    r"(-?\d+(?:\.\d+)?)"            # y2
-    r"(?:\s+(-?\d+(?:\.\d+)?))?",   # optional confidence
+    r"([a-zA-Z_]+)[\s:,]*"   # class name
+    + r"\s+".join([_NUM] * 4)  # x1 y1 x2 y2
+    + r"(?:\s+" + _NUM + r")?",  # optional confidence
 )
 
 
@@ -96,7 +95,12 @@ def parse_llava_output(
             continue
 
         x1, y1, x2, y2 = (float(m.group(i)) for i in range(2, 6))
-        score = float(m.group(6)) if m.group(6) is not None else 1.0
+        score = float(m.group(10)) if m.group(10) is not None else 1.0
+
+        # If coordinates are normalized (all values <= 1.0), convert to pixels
+        if max(abs(x1), abs(y1), abs(x2), abs(y2)) <= 1.0:
+            x1, x2 = x1 * img_w, x2 * img_w
+            y1, y2 = y1 * img_h, y2 * img_h
 
         if score < min_score:
             continue
@@ -128,15 +132,20 @@ def parse_llava_output(
 def build_prompt(img_w: int, img_h: int) -> str:
     """Return the prompt sent to LLaVA for object detection."""
     return (
-        "You are an object detection system for autonomous driving.\n"
-        "Detect all objects in this image that belong to these classes: "
-        "Car, Pedestrian, Cyclist.\n\n"
-        f"The image is {img_w} x {img_h} pixels.\n"
-        "For each detected object output exactly one line in this format:\n"
-        "  <class> <x1> <y1> <x2> <y2>\n"
-        "where x1 y1 is the top-left corner and x2 y2 is the bottom-right corner "
-        "in pixel coordinates.\n"
-        "Output only the detection lines. Do not add explanations or extra text."
+        "You are an object detection system for autonomous driving. "
+        "Detect all objects in this image from these classes: Car, Pedestrian, Cyclist.\n\n"
+        f"Image size: {img_w} x {img_h} pixels.\n\n"
+        "For each detected object, output exactly one line using this format:\n"
+        "CLASS X1 Y1 X2 Y2\n\n"
+        "Rules:\n"
+        "- CLASS is one of: Car, Pedestrian, Cyclist\n"
+        "- X1 Y1 is the top-left corner in pixels (integers)\n"
+        "- X2 Y2 is the bottom-right corner in pixels (integers)\n"
+        "- Do not use brackets, colons, or any extra text\n\n"
+        "Example output:\n"
+        "Car 245 120 480 310\n"
+        "Pedestrian 530 95 560 200\n\n"
+        "Now detect all objects in the image:"
     )
 
 
