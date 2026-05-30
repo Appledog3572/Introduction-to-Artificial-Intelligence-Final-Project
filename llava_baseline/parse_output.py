@@ -42,13 +42,21 @@ _ALIASES = {
 }
 _NAME_TO_ID.update(_ALIASES)
 
-# Regex: class name, then 4 numbers (optionally wrapped in <>), optional confidence
-# Handles both "Car 120 85 340 210" and "Car <120> <85> <340> <210>"
-_NUM = r"<?\s*(-?\d+(?:\.\d+)?)\s*>?"   # number optionally inside < >
+# Regex: class name, then 4 numbers in various formats:
+#   "Car 120 85 340 210"
+#   "Car: [0.09, 0.48, 0.28, 0.6]"
+#   "Car <120> <85> <340> <210>"
+_NUM = r"[-+]?\d+(?:\.\d+)?"
+_SEP = r"[\s,]+"
 _LINE_RE = re.compile(
-    r"([a-zA-Z_]+)[\s:,]*"   # class name
-    + r"\s+".join([_NUM] * 4)  # x1 y1 x2 y2
-    + r"(?:\s+" + _NUM + r")?",  # optional confidence
+    r"([a-zA-Z_]+)"
+    r"[\s:,\[]*"
+    r"(" + _NUM + r")" + _SEP
+    + r"(" + _NUM + r")" + _SEP
+    + r"(" + _NUM + r")" + _SEP
+    + r"(" + _NUM + r")"
+    + r"[\s\]]*"
+    + r"(?:" + _SEP + r"(" + _NUM + r"))?",
 )
 
 
