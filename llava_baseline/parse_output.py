@@ -132,20 +132,14 @@ def parse_llava_output(
 def build_prompt(img_w: int, img_h: int) -> str:
     """Return the prompt sent to LLaVA for object detection."""
     return (
-        "You are an object detection system for autonomous driving. "
-        "Detect all objects in this image from these classes: Car, Pedestrian, Cyclist.\n\n"
-        f"Image size: {img_w} x {img_h} pixels.\n\n"
-        "For each detected object, output exactly one line using this format:\n"
-        "CLASS X1 Y1 X2 Y2\n\n"
-        "Rules:\n"
-        "- CLASS is one of: Car, Pedestrian, Cyclist\n"
-        "- X1 Y1 is the top-left corner in pixels (integers)\n"
-        "- X2 Y2 is the bottom-right corner in pixels (integers)\n"
-        "- Do not use brackets, colons, or any extra text\n\n"
-        "Example output:\n"
-        "Car 245 120 480 310\n"
-        "Pedestrian 530 95 560 200\n\n"
-        "Now detect all objects in the image:"
+        "Look at this image carefully and find all Cars, Pedestrians, and Cyclists.\n\n"
+        f"The image is {img_w} pixels wide and {img_h} pixels tall.\n\n"
+        "For each object you find, output one line:\n"
+        "CLASS X1 Y1 X2 Y2\n"
+        "where CLASS is Car, Pedestrian, or Cyclist, "
+        "and X1 Y1 X2 Y2 are the bounding box pixel coordinates "
+        "(top-left corner then bottom-right corner).\n\n"
+        "Output only detection lines. If no objects are present, output: none"
     )
 
 
