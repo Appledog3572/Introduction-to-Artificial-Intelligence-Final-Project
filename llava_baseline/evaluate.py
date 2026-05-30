@@ -126,6 +126,7 @@ def evaluate(
     max_images: int | None = None,
     iou_threshold: float = 0.5,
     output_json: str | None = None,
+    debug_n: int = 0,        # print raw LLaVA output for first N images
 ) -> dict:
 
     dataset = KITTIDataset("datasets/kitti_dataset", split=split)
@@ -165,6 +166,11 @@ def evaluate(
                 "bbox":     gt["bbox"],
                 "image_id": img_id,
             })
+
+        if debug_n > 0 and i < debug_n:
+            print(f"\n[DEBUG {item['image_path'].name}]")
+            print(f"  raw_text : {result.raw_text!r}")
+            print(f"  parsed   : {result.detections}")
 
         if (i + 1) % 50 == 0 or (i + 1) == n:
             print(f"  {i + 1}/{n} images processed …")
@@ -224,6 +230,8 @@ if __name__ == "__main__":
     parser.add_argument("--iou",         type=float, default=0.5)
     parser.add_argument("--output-json", default=None,
                         help="Path to save results as JSON")
+    parser.add_argument("--debug-n", type=int, default=0,
+                        help="Print raw LLaVA output for first N images")
     args = parser.parse_args()
 
     evaluate(
@@ -233,4 +241,5 @@ if __name__ == "__main__":
         max_images=args.max_images,
         iou_threshold=args.iou,
         output_json=args.output_json,
+        debug_n=args.debug_n,
     )
