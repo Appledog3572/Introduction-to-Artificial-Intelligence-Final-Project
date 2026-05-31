@@ -1,15 +1,14 @@
 """
-LLaVA inference wrapper for KITTI object detection.
+Inference wrappers for KITTI object detection baseline.
 
-Two modes:
-  - mock:  Returns random detections; lets you test the full pipeline
-           without loading the model.
-  - llava: Loads LLaVA-1.5-7B (or another HuggingFace model) and runs
-           real inference. Requires a GPU with ~8 GB VRAM (4-bit quant).
+Modes:
+  - mock:   Returns random detections for pipeline testing.
+  - llava:  Loads LLaVA-1.5-7B locally (requires GPU ~8GB VRAM).
+  - gemini: Calls Gemini API (requires GEMINI_API_KEY env var).
 
 Usage:
-    runner = InferenceRunner(mode="mock")
-    result = runner.run(image, img_w, img_h)
+    runner = InferenceRunner(mode="gemini", model_id="gemini-2.0-flash")
+    result = runner.run(image)
     print(result.detections, result.latency_ms)
 """
 
@@ -153,22 +152,93 @@ class LLaVARunner:
 # Unified entry point
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Gemini API runner
+# ---------------------------------------------------------------------------
+
+class GeminiRunner:
+    """
+    Calls Gemini vision API for object detection.
+
+    Requires:
+        pip install google-generativeai pillow
+        GEMINI_API_KEY environment variable (or pass api_key directly)
+    """
+
+    DEFAULT_MODEL = "gemini-2.0-flash"
+
+    def __init__(self, model_id: str = DEFAULT_MODEL, api_key: str | None = None):
+        import google.generativeai as genai
+        import os
+
+        key = api_key or os.environ.get("GEMINI_API_KEY")
+        if not key:
+            raise ValueError(
+                "Gemini API key not found. "
+                "Set GEMINI_API_KEY env var or pass api_key=..."
+            )
+        genai.configure(api_key=key)
+        self.model = genai.GenerativeModel(model_id)
+        self.model_id = model_id
+        print(f"Gemini runner ready  [{model_id}]")
+
+    def run(self, image: Image.Image) -> InferenceResult:
+        import io
+        from parse_output import build_prompt, parse_llava_output
+
+        img_w, img_h = image.size
+        prompt = build_prompt(img_w, img_h)
+
+        # Convert PIL image to bytes for the API
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        img_bytes = buf.getvalue()
+
+        import google.generativeai as genai
+        image_part = {"mime_type": "image/png", "data": img_bytes}
+
+        t0 = time.perf_counter()
+        response = self.model.generate_content([prompt, image_part])
+        latency_ms = (time.perf_counter() - t0) * 1000
+
+        raw_text = response.text.strip() if response.text else ""
+        detections = parse_llava_output(raw_text, img_w, img_h)
+
+        return InferenceResult(
+            detections=detections,
+            raw_text=raw_text,
+            latency_ms=latency_ms,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Unified entry point
+# ---------------------------------------------------------------------------
+
 class InferenceRunner:
     """
     Factory that returns the right runner based on mode.
 
     Args:
-        mode:     "mock" or "llava"
-        model_id: HuggingFace model ID (llava mode only)
+        mode:     "mock", "llava", or "gemini"
+        model_id: model identifier (HuggingFace ID for llava, model name for gemini)
+        api_key:  Gemini API key (gemini mode only; falls back to GEMINI_API_KEY env var)
     """
 
-    def __init__(self, mode: str = "mock", model_id: str = LLaVARunner.DEFAULT_MODEL):
+    def __init__(
+        self,
+        mode: str = "mock",
+        model_id: str | None = None,
+        api_key: str | None = None,
+    ):
         if mode == "mock":
             self._runner = MockRunner()
         elif mode == "llava":
-            self._runner = LLaVARunner(model_id)
+            self._runner = LLaVARunner(model_id or LLaVARunner.DEFAULT_MODEL)
+        elif mode == "gemini":
+            self._runner = GeminiRunner(model_id or GeminiRunner.DEFAULT_MODEL, api_key)
         else:
-            raise ValueError(f"Unknown mode '{mode}'. Choose 'mock' or 'llava'.")
+            raise ValueError(f"Unknown mode '{mode}'. Choose 'mock', 'llava', or 'gemini'.")
         self.mode = mode
 
     def run(self, image: Image.Image) -> InferenceResult:
@@ -176,8 +246,8 @@ class InferenceRunner:
 
     @property
     def model_size_mb(self) -> float:
-        """Return model size in MB (0.0 for mock mode)."""
-        if self.mode == "mock":
+        """Return model size in MB (N/A for API-based or mock modes)."""
+        if self.mode != "llava":
             return 0.0
         import torch
         model = self._runner.model

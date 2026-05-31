@@ -122,15 +122,16 @@ def compute_ap_for_class(
 def evaluate(
     split: str = "val",
     mode: str = "mock",
-    model_id: str = "llava-hf/llava-1.5-7b-hf",
+    model_id: str | None = None,
     max_images: int | None = None,
     iou_threshold: float = 0.5,
     output_json: str | None = None,
-    debug_n: int = 0,        # print raw LLaVA output for first N images
+    debug_n: int = 0,
+    api_key: str | None = None,
 ) -> dict:
 
     dataset = KITTIDataset("datasets/kitti_dataset", split=split)
-    runner  = InferenceRunner(mode=mode, model_id=model_id)
+    runner  = InferenceRunner(mode=mode, model_id=model_id, api_key=api_key)
 
     n = min(len(dataset), max_images) if max_images else len(dataset)
     print(f"Evaluating {n} images  [mode={mode}  split={split}]")
@@ -140,6 +141,7 @@ def evaluate(
     gts_by_class:   dict[int, list] = defaultdict(list)
 
     latencies: list[float] = []
+    per_image: list[dict] = []
 
     for i in range(n):
         item   = dataset[i]
@@ -153,6 +155,23 @@ def evaluate(
         # Use model-reported latency when available, else wall-clock
         latency = result.latency_ms if result.latency_ms > 0 else wall_ms
         latencies.append(latency)
+
+        preds = [
+            {"class": d.class_name, "bbox": d.bbox, "score": d.score}
+            for d in result.detections
+        ]
+        gts = [
+            {"class": g["class_name"], "bbox": g["bbox"]}
+            for g in item["gt"]
+        ]
+
+        per_image.append({
+            "image_id":   img_id,
+            "latency_ms": round(latency, 1),
+            "raw_text":   result.raw_text,
+            "predictions": preds,
+            "ground_truth": gts,
+        })
 
         for det in result.detections:
             preds_by_class[det.class_id].append({
@@ -191,15 +210,16 @@ def evaluate(
     model_mb  = round(runner.model_size_mb, 1)
 
     results = {
-        "mode":           mode,
-        "split":          split,
-        "n_images":       n,
-        "iou_threshold":  iou_threshold,
-        "mAP":            mean_ap,
-        "AP_per_class":   ap_per_class,
+        "mode":            mode,
+        "split":           split,
+        "n_images":        n,
+        "iou_threshold":   iou_threshold,
+        "mAP":             mean_ap,
+        "AP_per_class":    ap_per_class,
         "mean_latency_ms": mean_lat,
-        "mean_FPS":       mean_fps,
-        "model_size_MB":  model_mb,
+        "mean_FPS":        mean_fps,
+        "model_size_MB":   model_mb,
+        "per_image":       per_image,
     }
 
     print("\n=== Results ===")
@@ -224,14 +244,16 @@ def evaluate(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--split",       default="val",  choices=["train", "val", "test"])
-    parser.add_argument("--mode",        default="mock", choices=["mock", "llava"])
+    parser.add_argument("--mode",        default="mock", choices=["mock", "llava", "gemini"])
     parser.add_argument("--model-id",    default="llava-hf/llava-1.5-7b-hf")
     parser.add_argument("--max-images",  type=int, default=None)
     parser.add_argument("--iou",         type=float, default=0.5)
     parser.add_argument("--output-json", default=None,
                         help="Path to save results as JSON")
     parser.add_argument("--debug-n", type=int, default=0,
-                        help="Print raw LLaVA output for first N images")
+                        help="Print raw model output for first N images")
+    parser.add_argument("--api-key", default=None,
+                        help="API key (gemini mode); falls back to GEMINI_API_KEY env var")
     args = parser.parse_args()
 
     evaluate(
@@ -242,4 +264,5 @@ if __name__ == "__main__":
         iou_threshold=args.iou,
         output_json=args.output_json,
         debug_n=args.debug_n,
+        api_key=args.api_key,
     )
