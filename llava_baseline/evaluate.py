@@ -122,15 +122,16 @@ def compute_ap_for_class(
 def evaluate(
     split: str = "val",
     mode: str = "mock",
-    model_id: str = "llava-hf/llava-1.5-7b-hf",
+    model_id: str | None = None,
     max_images: int | None = None,
     iou_threshold: float = 0.5,
     output_json: str | None = None,
-    debug_n: int = 0,        # print raw LLaVA output for first N images
+    debug_n: int = 0,
+    api_key: str | None = None,
 ) -> dict:
 
     dataset = KITTIDataset("datasets/kitti_dataset", split=split)
-    runner  = InferenceRunner(mode=mode, model_id=model_id)
+    runner  = InferenceRunner(mode=mode, model_id=model_id, api_key=api_key)
 
     n = min(len(dataset), max_images) if max_images else len(dataset)
     print(f"Evaluating {n} images  [mode={mode}  split={split}]")
@@ -250,7 +251,9 @@ if __name__ == "__main__":
     parser.add_argument("--output-json", default=None,
                         help="Path to save results as JSON")
     parser.add_argument("--debug-n", type=int, default=0,
-                        help="Print raw LLaVA output for first N images")
+                        help="Print raw model output for first N images")
+    parser.add_argument("--api-key", default=None,
+                        help="API key (gemini mode); falls back to GEMINI_API_KEY env var")
     args = parser.parse_args()
 
     evaluate(
@@ -261,4 +264,5 @@ if __name__ == "__main__":
         iou_threshold=args.iou,
         output_json=args.output_json,
         debug_n=args.debug_n,
+        api_key=args.api_key,
     )
