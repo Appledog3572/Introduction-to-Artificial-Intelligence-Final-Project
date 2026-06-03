@@ -244,7 +244,7 @@ def evaluate(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--split",       default="val",  choices=["train", "val", "test"])
-    parser.add_argument("--mode",        default="mock", choices=["mock", "llava", "gemini"])
+    parser.add_argument("--mode",        default="mock", choices=["mock", "llava", "gemini", "gpt4o"])
     parser.add_argument("--model-id",    default="llava-hf/llava-1.5-7b-hf")
     parser.add_argument("--max-images",  type=int, default=None)
     parser.add_argument("--iou",         type=float, default=0.5)
