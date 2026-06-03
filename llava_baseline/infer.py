@@ -4,7 +4,8 @@ Inference wrappers for KITTI object detection baseline.
 Modes:
   - mock:   Returns random detections for pipeline testing.
   - llava:  Loads LLaVA-1.5-7B locally (requires GPU ~8GB VRAM).
-  - gemini: Calls Gemini API (requires GEMINI_API_KEY env var).
+  - gemini: Calls Gemini API via google-genai SDK (requires GEMINI_API_KEY).
+  - gpt4o:  Calls OpenAI GPT-4o API (requires OPENAI_API_KEY).
 
 Usage:
     runner = InferenceRunner(mode="gemini", model_id="gemini-2.0-flash")
@@ -149,59 +150,116 @@ class LLaVARunner:
 
 
 # ---------------------------------------------------------------------------
-# Unified entry point
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 # Gemini API runner
 # ---------------------------------------------------------------------------
 
 class GeminiRunner:
     """
-    Calls Gemini vision API for object detection.
+    Calls Gemini vision API via google-genai SDK.
 
     Requires:
-        pip install google-generativeai pillow
+        pip install google-genai pillow
         GEMINI_API_KEY environment variable (or pass api_key directly)
     """
 
     DEFAULT_MODEL = "gemini-2.0-flash"
 
     def __init__(self, model_id: str = DEFAULT_MODEL, api_key: str | None = None):
-        import google.generativeai as genai
+        from google import genai
         import os
 
         key = api_key or os.environ.get("GEMINI_API_KEY")
         if not key:
-            raise ValueError(
-                "Gemini API key not found. "
-                "Set GEMINI_API_KEY env var or pass api_key=..."
-            )
-        genai.configure(api_key=key)
-        self.model = genai.GenerativeModel(model_id)
+            raise ValueError("Set GEMINI_API_KEY env var or pass api_key=...")
+        self.client = genai.Client(api_key=key)
         self.model_id = model_id
         print(f"Gemini runner ready  [{model_id}]")
 
     def run(self, image: Image.Image) -> InferenceResult:
         import io
+        from google.genai import types
         from parse_output import build_prompt, parse_llava_output
 
         img_w, img_h = image.size
         prompt = build_prompt(img_w, img_h)
 
-        # Convert PIL image to bytes for the API
         buf = io.BytesIO()
         image.save(buf, format="PNG")
         img_bytes = buf.getvalue()
 
-        import google.generativeai as genai
-        image_part = {"mime_type": "image/png", "data": img_bytes}
-
         t0 = time.perf_counter()
-        response = self.model.generate_content([prompt, image_part])
+        response = self.client.models.generate_content(
+            model=self.model_id,
+            contents=[
+                types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
+                prompt,
+            ],
+        )
         latency_ms = (time.perf_counter() - t0) * 1000
 
         raw_text = response.text.strip() if response.text else ""
+        detections = parse_llava_output(raw_text, img_w, img_h)
+
+        return InferenceResult(
+            detections=detections,
+            raw_text=raw_text,
+            latency_ms=latency_ms,
+        )
+
+
+# ---------------------------------------------------------------------------
+# OpenAI GPT-4o runner
+# ---------------------------------------------------------------------------
+
+class OpenAIRunner:
+    """
+    Calls OpenAI GPT-4o (or compatible) vision API.
+
+    Requires:
+        pip install openai pillow
+        OPENAI_API_KEY environment variable (or pass api_key directly)
+    """
+
+    DEFAULT_MODEL = "gpt-4o"
+
+    def __init__(self, model_id: str = DEFAULT_MODEL, api_key: str | None = None):
+        from openai import OpenAI
+        import os
+
+        key = api_key or os.environ.get("OPENAI_API_KEY")
+        if not key:
+            raise ValueError("Set OPENAI_API_KEY env var or pass api_key=...")
+        self.client = OpenAI(api_key=key)
+        self.model_id = model_id
+        print(f"OpenAI runner ready  [{model_id}]")
+
+    def run(self, image: Image.Image) -> InferenceResult:
+        import base64, io
+        from parse_output import build_prompt, parse_llava_output
+
+        img_w, img_h = image.size
+        prompt = build_prompt(img_w, img_h)
+
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode()
+
+        t0 = time.perf_counter()
+        response = self.client.chat.completions.create(
+            model=self.model_id,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url",
+                     "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+            max_tokens=512,
+        )
+        latency_ms = (time.perf_counter() - t0) * 1000
+
+        raw_text = response.choices[0].message.content.strip()
         detections = parse_llava_output(raw_text, img_w, img_h)
 
         return InferenceResult(
@@ -220,9 +278,9 @@ class InferenceRunner:
     Factory that returns the right runner based on mode.
 
     Args:
-        mode:     "mock", "llava", or "gemini"
-        model_id: model identifier (HuggingFace ID for llava, model name for gemini)
-        api_key:  Gemini API key (gemini mode only; falls back to GEMINI_API_KEY env var)
+        mode:     "mock", "llava", "gemini", or "gpt4o"
+        model_id: model identifier (HuggingFace ID for llava, model name for others)
+        api_key:  API key for gemini/gpt4o (falls back to env vars)
     """
 
     def __init__(
@@ -237,8 +295,10 @@ class InferenceRunner:
             self._runner = LLaVARunner(model_id or LLaVARunner.DEFAULT_MODEL)
         elif mode == "gemini":
             self._runner = GeminiRunner(model_id or GeminiRunner.DEFAULT_MODEL, api_key)
+        elif mode == "gpt4o":
+            self._runner = OpenAIRunner(model_id or OpenAIRunner.DEFAULT_MODEL, api_key)
         else:
-            raise ValueError(f"Unknown mode '{mode}'. Choose 'mock', 'llava', or 'gemini'.")
+            raise ValueError(f"Unknown mode '{mode}'. Choose 'mock', 'llava', 'gemini', or 'gpt4o'.")
         self.mode = mode
 
     def run(self, image: Image.Image) -> InferenceResult:
