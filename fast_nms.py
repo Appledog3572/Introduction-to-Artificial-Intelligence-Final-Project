@@ -124,7 +124,7 @@ def benchmark(
 
     results = {}
 
-    for label, use_fast in [("Standard NMS", False), ("Fast NMS", False)]:
+    for label, use_fast in [("Standard NMS", False), ("Fast NMS", True)]:
         if use_fast:
             patch()
         else:
