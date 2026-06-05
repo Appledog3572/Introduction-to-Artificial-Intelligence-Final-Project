@@ -19,8 +19,11 @@ CLASS_NAMES = {
     8: "DontCare",
 }
 
-# Classes the proposal focuses on
-TARGET_CLASSES = {0, 3, 5}  # Car, Pedestrian, Cyclist
+# Proposal focus: Car, Pedestrian, Cyclist
+TARGET_CLASSES = {0, 3, 5}
+
+# Full KITTI classes (excluding DontCare=8)
+FULL_CLASSES = {0, 1, 2, 3, 4, 5, 6, 7}
 
 
 def yolo_to_xyxy(cx, cy, w, h, img_w, img_h):
@@ -32,13 +35,15 @@ def yolo_to_xyxy(cx, cy, w, h, img_w, img_h):
     return [x1, y1, x2, y2]
 
 
-def load_labels(label_path: Path, img_w: int, img_h: int, target_only: bool = True):
+def load_labels(label_path: Path, img_w: int, img_h: int,
+                allowed_classes: set | None = None):
     """
     Load ground-truth boxes from a YOLO-format label file.
 
-    Returns list of dicts: {class_id, class_name, bbox: [x1,y1,x2,y2]}
-    If target_only=True, filters to TARGET_CLASSES only.
+    allowed_classes: set of class IDs to keep (None → TARGET_CLASSES).
     """
+    if allowed_classes is None:
+        allowed_classes = TARGET_CLASSES
     annotations = []
     if not label_path.exists():
         return annotations
@@ -48,14 +53,14 @@ def load_labels(label_path: Path, img_w: int, img_h: int, target_only: bool = Tr
         if len(parts) != 5:
             continue
         cls_id = int(parts[0])
-        if target_only and cls_id not in TARGET_CLASSES:
+        if cls_id not in allowed_classes:
             continue
         cx, cy, w, h = map(float, parts[1:])
         bbox = yolo_to_xyxy(cx, cy, w, h, img_w, img_h)
         annotations.append({
-            "class_id": cls_id,
+            "class_id":   cls_id,
             "class_name": CLASS_NAMES[cls_id],
-            "bbox": bbox,
+            "bbox":       bbox,
         })
     return annotations
 
@@ -64,18 +69,15 @@ class KITTIDataset:
     """
     Iterates over a KITTI split (train/val/test).
 
-    Usage:
-        dataset = KITTIDataset("datasets/kitti_dataset", split="val")
-        for item in dataset:
-            image      = item["image"]       # PIL.Image
-            image_path = item["image_path"]  # Path
-            gt         = item["gt"]          # list of annotation dicts
+    Args:
+        full_classes: If True, load all 8 KITTI classes; otherwise only
+                      Car / Pedestrian / Cyclist (TARGET_CLASSES).
     """
 
-    def __init__(self, root: str, split: str = "val", target_only: bool = True):
+    def __init__(self, root: str, split: str = "val", full_classes: bool = False):
         self.root = Path(root)
         self.split = split
-        self.target_only = target_only
+        self.allowed_classes = FULL_CLASSES if full_classes else TARGET_CLASSES
 
         self.image_dir = self.root / "images" / split
         self.label_dir = self.root / "labels" / split
@@ -93,7 +95,7 @@ class KITTIDataset:
         img_w, img_h = image.size
 
         label_path = self.label_dir / (image_path.stem + ".txt")
-        gt = load_labels(label_path, img_w, img_h, self.target_only)
+        gt = load_labels(label_path, img_w, img_h, self.allowed_classes)
 
         return {
             "image": image,
@@ -109,12 +111,10 @@ class KITTIDataset:
 
 
 if __name__ == "__main__":
-    dataset = KITTIDataset("datasets/kitti_dataset", split="train")
-    print(f"Total images: {len(dataset)}")
-
-    sample = dataset[0]
-    print(f"Image: {sample['image_path'].name}  size: {sample['img_w']}x{sample['img_h']}")
-    print(f"Ground truth ({len(sample['gt'])} objects):")
-    for ann in sample["gt"]:
-        bbox = [f"{v:.1f}" for v in ann["bbox"]]
-        print(f"  {ann['class_name']:15s} bbox={bbox}")
+    for label in ("3-class", "full"):
+        full = label == "full"
+        dataset = KITTIDataset("datasets/kitti_dataset", split="train", full_classes=full)
+        sample = dataset[0]
+        print(f"[{label}] {sample['image_path'].name}  gt={len(sample['gt'])} objects")
+        for ann in sample["gt"]:
+            print(f"  [{ann['class_id']}] {ann['class_name']}")

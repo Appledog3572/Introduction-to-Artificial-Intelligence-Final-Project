@@ -27,20 +27,30 @@ from dataset import CLASS_NAMES, TARGET_CLASSES
 _NAME_TO_ID: dict[str, int] = {}
 for _cid, _cname in CLASS_NAMES.items():
     _NAME_TO_ID[_cname.lower()] = _cid
-# Common aliases LLaVA might use
+# Common aliases LLaVA / Gemini might use
 _ALIASES = {
-    "person": 3,        # → Pedestrian
-    "people": 3,
-    "human": 3,
-    "vehicle": 0,       # → Car
-    "automobile": 0,
-    "truck": 2,
-    "van": 1,
-    "bike": 5,          # → Cyclist
-    "bicycle": 5,
-    "motorcyclist": 5,
+    "person":         3,   # → Pedestrian
+    "people":         3,
+    "human":          3,
+    "walker":         3,
+    "vehicle":        0,   # → Car
+    "automobile":     0,
+    "sedan":          0,
+    "suv":            0,
+    "bike":           5,   # → Cyclist
+    "bicycle":        5,
+    "motorcyclist":   5,
+    "motorbike":      5,
+    "person_sitting": 4,
+    "sitting":        4,
+    "tram":           6,
+    "streetcar":      6,
+    "misc":           7,
 }
 _NAME_TO_ID.update(_ALIASES)
+
+_TARGET_CLASS_NAMES = "Car, Pedestrian, Cyclist"
+_FULL_CLASS_NAMES   = "Car, Van, Truck, Pedestrian, Person_sitting, Cyclist, Tram, Misc"
 
 # Regex: class name, then 4 numbers in various formats:
 #   "Car 120 85 340 210"
@@ -137,16 +147,17 @@ def parse_llava_output(
     return detections
 
 
-def build_prompt(img_w: int, img_h: int) -> str:
-    """Return the prompt sent to LLaVA for object detection."""
+def build_prompt(img_w: int, img_h: int, full_classes: bool = False) -> str:
+    """Return the detection prompt. full_classes=True uses all 8 KITTI classes."""
+    class_list = _FULL_CLASS_NAMES if full_classes else _TARGET_CLASS_NAMES
     return (
-        "Look at this image carefully and find all Cars, Pedestrians, and Cyclists.\n\n"
+        f"Look at this image carefully and find all objects of these classes: {class_list}.\n\n"
         f"The image is {img_w} pixels wide and {img_h} pixels tall.\n\n"
         "For each object you find, output one line:\n"
         "CLASS X1 Y1 X2 Y2\n"
-        "where CLASS is Car, Pedestrian, or Cyclist, "
+        "where CLASS is one of the listed class names, "
         "and X1 Y1 X2 Y2 are the bounding box pixel coordinates "
-        "(top-left corner then bottom-right corner).\n\n"
+        "(top-left corner then bottom-right corner, integers).\n\n"
         "Output only detection lines. If no objects are present, output: none"
     )
 
